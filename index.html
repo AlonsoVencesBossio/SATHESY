@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HVAC Control Center - SATHESY</title>
+<!-- Chart.js para los gráficos -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- SheetJS para leer archivos Excel de forma dinámica -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --border:#334155;
+    --txt:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --green:#22c55e;
+    --yellow:#eab308; --red:#ef4444; --orange:#f97316; --purple:#a855f7;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Roboto,sans-serif}
+  body{background:var(--bg);color:var(--txt);padding:16px}
+  header{display:flex;justify-content:space-between;align-items:center;
+    padding:16px 24px;background:linear-gradient(90deg,#1e3a8a,#0f172a);
+    border-radius:12px;margin-bottom:16px;border:1px solid var(--border);flex-wrap:wrap;gap:12px}
+  header h1{font-size:22px;letter-spacing:1px}
+  header h1 span{color:var(--accent)}
+  .header-controls {display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+  .btn-upload {background:var(--accent);color:#0f172a;padding:8px 14px;border-radius:8px;
+    font-size:13px;font-weight:bold;cursor:pointer;border:none;transition:.2s;display:flex;align-items:center;gap:6px;}
+  .btn-upload:hover {background:#0ea5e9;}
+  .filters{display:flex;gap:10px;flex-wrap:wrap}
+  select,input{background:var(--panel2);color:var(--txt);border:1px solid var(--border);
+    padding:8px 12px;border-radius:8px;font-size:13px}
+  .tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+  .tab{padding:10px 20px;background:var(--panel);border:1px solid var(--border);
+    border-radius:8px;cursor:pointer;font-size:14px;transition:.2s}
+  .tab:hover{background:var(--panel2)}
+  .tab.active{background:var(--accent);color:#0f172a;font-weight:bold;border-color:var(--accent)}
+  .grid{display:grid;gap:16px}
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:16px;position:relative}
+  .card h3{font-size:12px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:1px;margin-bottom:8px}
+  .card .value{font-size:32px;font-weight:bold}
+  .card .sub{font-size:12px;color:var(--muted);margin-top:4px}
+  .card.green .value{color:var(--green)}
+  .card.red .value{color:var(--red)}
+  .card.yellow .value{color:var(--yellow)}
+  .card.blue .value{color:var(--accent)}
+  .card.purple .value{color:var(--purple)}
+  .charts{grid-template-columns:repeat(auto-fit,minmax(380px,1fr));margin-top:16px}
+  .chart-box{background:var(--panel);border:1px solid var(--border);
+    border-radius:12px;padding:16px;height:340px;position:relative}
+  .chart-box h3{font-size:14px;margin-bottom:12px;color:var(--accent)}
+  canvas{max-height:280px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
+  th{background:var(--panel2);color:var(--accent);font-size:11px;text-transform:uppercase}
+  tr:hover{background:var(--panel2)}
+  .badge{padding:2px 8px;border-radius:12px;font-size:10px;font-weight:bold}
+  .b-green{background:#14532d;color:#86efac}
+  .b-yellow{background:#713f12;color:#fde047}
+  .b-red{background:#7f1d1d;color:#fca5a5}
+  .b-blue{background:#1e3a8a;color:#93c5fd}
+  .table-wrap{background:var(--panel);border:1px solid var(--border);
+    border-radius:12px;padding:16px;overflow:auto;max-height:600px}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>❄️ SATHESY <span>CONTROL CENTER</span></h1>
+  <div class="header-controls">
+    <label class="btn-upload">
+      📂 Cargar Excel Actualizado
+      <input type="file" id="excelFile" accept=".xlsx, .xls" style="display:none" onchange="cargarExcel(event)">
+    </label>
+    <div class="filters">
+      <select id="fCliente"><option value="">Todos los clientes</option></select>
+      <select id="fTipo"><option value="">Todos los tipos</option></select>
+      <select id="fEstado"><option value="">Todos los estados</option></select>
+      <input type="date" id="fDesde" title="Desde">
+      <input type="date" id="fHasta" title="Hasta">
+    </div>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="resumen">📊 Resumen</div>
+  <div class="tab" data-tab="equipos">🔧 Equipos</div>
+  <div class="tab" data-tab="mantto">⏱️ Mantenimiento</div>
+  <div class="tab" data-tab="stock">📦 Stock & Demanda</div>
+  <div class="tab" data-tab="alertas">🚨 Alertas</div>
+</div>
+
+<!-- ========== TAB RESUMEN ========== -->
+<section id="tab-resumen">
+  <div class="grid kpis">
+    <div class="card blue"><h3>Total Equipos</h3><div class="value" id="kTotal">—</div><div class="sub">en el parque</div></div>
+    <div class="card green"><h3>Operativos</h3><div class="value" id="kOper">—</div><div class="sub" id="kOperPct">—</div></div>
+    <div class="card yellow"><h3>En Observación</h3><div class="value" id="kObs">—</div><div class="sub">requieren atención</div></div>
+    <div class="card red"><h3>Fuera de Servicio</h3><div class="value" id="kFS">—</div><div class="sub">críticos</div></div>
+    <div class="card purple"><h3>Intervenciones</h3><div class="value" id="kInt">—</div><div class="sub">en el periodo</div></div>
+    <div class="card blue"><h3>Cumplimiento</h3><div class="value" id="kCump">—</div><div class="sub">vs frecuencia nominal</div></div>
+  </div>
+  <div class="grid charts">
+    <div class="chart-box"><h3>Estado de Equipos</h3><canvas id="chEstado"></canvas></div>
+    <div class="chart-box"><h3>Equipos por Tipo</h3><canvas id="chTipo"></canvas></div>
+    <div class="chart-box"><h3>Intervenciones por Mes</h3><canvas id="chMes"></canvas></div>
+    <div class="chart-box"><h3>Capacidad Instalada (TR) por Cliente</h3><canvas id="chCap"></canvas></div>
+  </div>
+</section>
+
+<!-- ========== TAB EQUIPOS ========== -->
+<section id="tab-equipos" class="hidden">
+  <div class="grid kpis" style="margin-bottom:16px">
+    <div class="card blue"><h3>Capacidad Total</h3><div class="value" id="kCapTotal">—</div><div class="sub">TR instaladas</div></div>
+    <div class="card green"><h3>Refrigerantes</h3><div class="value" id="kRefrig">—</div><div class="sub">tipos en uso</div></div>
+    <div class="card yellow"><h3>R-22 (a migrar)</h3><div class="value" id="kR22">—</div><div class="sub">equipos con R-22</div></div>
+  </div>
+  <div class="grid charts">
+    <div class="chart-box"><h3>Distribución por Refrigerante</h3><canvas id="chRefrig"></canvas></div>
+    <div class="chart-box"><h3>Equipos por Cliente</h3><canvas id="chCli"></canvas></div>
+  </div>
+  <div class="table-wrap" style="margin-top:16px">
+    <h3 style="color:var(--accent);margin-bottom:12px">📋 Listado de Equipos</h3>
+    <table id="tblEquipos"><thead><tr>
+      <th>ID</th><th>Tag</th><th>Tipo</th><th>Marca</th><th>Cliente</th>
+      <th>TR</th><th>Refrig.</th><th>Frec.</th><th>Estado</th><th>Próx.</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<!-- ========== TAB MANTENIMIENTO ========== -->
+<section id="tab-mantto" class="hidden">
+  <div class="grid kpis" style="margin-bottom:16px">
+    <div class="card blue"><h3>Intervalo Promedio</h3><div class="value" id="kIntProm">—</div><div class="sub">días entre visitas</div></div>
+    <div class="card green"><h3>Preventivos</h3><div class="value" id="kPrev">—</div><div class="sub">% del total</div></div>
+    <div class="card yellow"><h3>Correctivos</h3><div class="value" id="kCorr">—</div><div class="sub">% del total</div></div>
+    <div class="card red"><h3>Desviación Promedio</h3><div class="value" id="kDesv">—</div><div class="sub">días vs frecuencia</div></div>
+  </div>
+  <div class="grid charts">
+    <div class="chart-box" style="height:400px"><h3>Intervalo Real vs Frecuencia Nominal (días)</h3><canvas id="chIntervalos"></canvas></div>
+    <div class="chart-box" style="height:400px"><h3>Intervalo Real vs Capacidad (TR)</h3><canvas id="chScatter"></canvas></div>
+    <div class="chart-box"><h3>Intervenciones por Técnico</h3><canvas id="chTecnico"></canvas></div>
+    <div class="chart-box"><h3>Tipo de Intervención</h3><canvas id="chTipoInt"></canvas></div>
+  </div>
+  <div class="table-wrap" style="margin-top:16px">
+    <h3 style="color:var(--accent);margin-bottom:12px">📈 Análisis de Intervalos por Equipo</h3>
+    <table id="tblIntervalos"><thead><tr>
+      <th>Equipo</th><th>Tipo</th><th>Frec. Nominal</th><th>Visitas</th>
+      <th>Intervalo Prom.</th><th>Desviación</th><th>Cumplimiento</th><th>Diagnóstico</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<!-- ========== TAB STOCK ========== -->
+<section id="tab-stock" class="hidden">
+  <div class="grid kpis" style="margin-bottom:16px">
+    <div class="card blue"><h3>Repuestos</h3><div class="value" id="kRep">—</div><div class="sub">en catálogo</div></div>
+    <div class="card green"><h3>Stock OK</h3><div class="value" id="kStockOK">—</div><div class="sub">por encima del mínimo</div></div>
+    <div class="card yellow"><h3>Stock Bajo</h3><div class="value" id="kStockBajo">—</div><div class="sub">cerca del mínimo</div></div>
+    <div class="card red"><h3>Quiebre</h3><div class="value" id="kQuiebre">—</div><div class="sub">bajo el mínimo</div></div>
+  </div>
+  <div class="grid charts">
+    <div class="chart-box"><h3>Stock Actual vs Mínimo (Top 12)</h3><canvas id="chStock"></canvas></div>
+    <div class="chart-box"><h3>Curva ABC — Consumo Mensual</h3><canvas id="chABC"></canvas></div>
+  </div>
+  <div class="table-wrap" style="margin-top:16px">
+    <h3 style="color:var(--accent);margin-bottom:12px">📦 Inventario y Punto de Reorden</h3>
+    <table id="tblStock"><thead><tr>
+      <th>ID</th><th>Descripción</th><th>Stock</th><th>Mínimo</th>
+      <th>Consumo/mes</th><th>Días cobertura</th><th>Punto reorden</th><th>Estado</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<!-- ========== TAB ALERTAS ========== -->
+<section id="tab-alertas" class="hidden">
+  <div class="grid kpis" style="margin-bottom:16px">
+    <div class="card red"><h3>Equipos Críticos</h3><div class="value" id="kCriticos">—</div><div class="sub">fuera de servicio</div></div>
+    <div class="card yellow"><h3>Próx. 30 días</h3><div class="value" id="kProx30">—</div><div class="sub">mantenimientos</div></div>
+    <div class="card orange"><h3>Vencidos</h3><div class="value" id="kVencidos">—</div><div class="sub">pasaron fecha</div></div>
+  </div>
+  <div class="grid charts">
+    <div class="chart-box" style="height:380px"><h3>🚨 Equipos que Requieren Atención</h3>
+      <div id="listaAlertas" style="max-height:320px;overflow:auto;margin-top:8px"></div>
+    </div>
+    <div class="chart-box" style="height:380px"><h3>📅 Próximos Mantenimientos</h3>
+      <div id="listaProx" style="max-height:320px;overflow:auto;margin-top:8px"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+// ============================================================
+// DATOS POR DEFECTO (iniciales basados en el Excel proporcionado)
+// ============================================================
+let CLIENTES = [
+  {id:"CL-01",nombre:"Greencare"},{id:"CL-02",nombre:"Blues Company"},
+  {id:"CL-03",nombre:"Plaza San Miguel"},{id:"CL-04",nombre:"Jockey Plaza"},
+  {id:"CL-05",nombre:"UTP"},{id:"CL-06",nombre:"Clínica ODAM"},
+  {id:"CL-07",nombre:"Pollería Pardos"},{id:"CL-08",nombre:"Import Gav"}
+];
+
+let EQUIPOS = [
+  {id:"EQ-001",cli:"CL-01",tag:"3561-SS-301",ubi:"Subestación SS-301",tipo:"Condensadora",marca:"Daikin",tr:20,ref:"R-410A",frec:90,estado:"En observación",ult:"2026-09-27",prox:"2026-12-26"},
+  {id:"EQ-002",cli:"CL-01",tag:"3561-AC-110",ubi:"Oficinas",tipo:"Rooftop",marca:"Trane",tr:15,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-07-18",prox:"2026-10-16"},
+  {id:"EQ-003",cli:"CL-01",tag:"3561-SS-302",ubi:"Subestación SS-302",tipo:"Condensadora",marca:"Thermotar",tr:20,ref:"R-410A",frec:90,estado:"Pendiente de instalación",ult:"",prox:""},
+  {id:"EQ-004",cli:"CL-01",tag:"3561-CH-001",ubi:"Casa de máquinas",tipo:"Chiller",marca:"Carrier",tr:50,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-06-23",prox:"2026-09-21"},
+  {id:"EQ-005",cli:"CL-02",tag:"CSA-AC-201",ubi:"Quirófanos",tipo:"Rooftop",marca:"Trane",tr:10,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-09-24",prox:"2026-12-23"},
+  {id:"EQ-006",cli:"CL-02",tag:"CSA-CH-001",ubi:"Sala de máquinas",tipo:"Chiller",marca:"York",tr:120,ref:"R-134a",frec:90,estado:"Operativo",ult:"2026-08-14",prox:"2026-11-12"},
+  {id:"EQ-007",cli:"CL-02",tag:"CSA-CS-310",ubi:"Sala de espera",tipo:"Cassette",marca:"LG",tr:5,ref:"R-410A",frec:180,estado:"Operativo",ult:"2026-08-09",prox:"2027-02-05"},
+  {id:"EQ-008",cli:"CL-02",tag:"CSA-VRF-01",ubi:"Consultorios",tipo:"VRF",marca:"Samsung",tr:14,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-09-12",prox:"2026-12-11"},
+  {id:"EQ-009",cli:"CL-03",tag:"CCA-RT-01",ubi:"Tienda ancla",tipo:"Rooftop",marca:"York",tr:25,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-07-20",prox:"2026-10-18"},
+  {id:"EQ-010",cli:"CL-03",tag:"CCA-RT-02",ubi:"Patio comidas",tipo:"Rooftop",marca:"York",tr:25,ref:"R-410A",frec:90,estado:"Fuera de servicio",ult:"2026-09-14",prox:"2026-12-13"},
+  {id:"EQ-011",cli:"CL-03",tag:"CCA-RT-03",ubi:"Oficinas",tipo:"Rooftop",marca:"Trane",tr:15,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-09-12",prox:"2026-12-11"},
+  {id:"EQ-012",cli:"CL-03",tag:"CCA-SP-05",ubi:"Administración",tipo:"Split",marca:"Midea",tr:5,ref:"R-410A",frec:180,estado:"Operativo",ult:"2026-03-19",prox:"2026-09-15"},
+  {id:"EQ-013",cli:"CL-04",tag:"HBP-CH-001",ubi:"Sótano",tipo:"Chiller",marca:"Trane",tr:80,ref:"R-134a",frec:90,estado:"Operativo",ult:"2026-07-08",prox:"2026-10-06"},
+  {id:"EQ-014",cli:"CL-04",tag:"HBP-VRF-01",ubi:"Torre A",tipo:"VRF",marca:"LG",tr:20,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-09-29",prox:"2026-12-28"},
+  {id:"EQ-015",cli:"CL-04",tag:"HBP-MS-021",ubi:"Recepción",tipo:"Minisplit",marca:"Samsung",tr:2,ref:"R-32",frec:180,estado:"Operativo",ult:"2026-05-14",prox:"2026-11-10"},
+  {id:"EQ-016",cli:"CL-04",tag:"HBP-SP-007",ubi:"Lavandería",tipo:"Split",marca:"Carrier",tr:5,ref:"R-22",frec:180,estado:"En observación",ult:"2025-11-01",prox:"2026-04-30"},
+  {id:"EQ-017",cli:"CL-05",tag:"DCA-CRAC-01",ubi:"Servidores A",tipo:"CRAC",marca:"Vertiv",tr:20,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-07-25",prox:"2026-10-23"},
+  {id:"EQ-018",cli:"CL-05",tag:"DCA-CRAC-02",ubi:"Servidores A",tipo:"CRAC",marca:"Vertiv",tr:20,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-09-19",prox:"2026-12-18"},
+  {id:"EQ-019",cli:"CL-05",tag:"DCA-CRAC-03",ubi:"Servidores B",tipo:"CRAC",marca:"Vertiv",tr:15,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-09-03",prox:"2026-12-02"},
+  {id:"EQ-020",cli:"CL-05",tag:"DCA-SP-UPS",ubi:"Sala UPS",tipo:"Split",marca:"Carrier",tr:3,ref:"R-410A",frec:90,estado:"Operativo",ult:"2026-09-30",prox:"2026-12-29"}
+];
+
+let HISTORIAL = [
+  {id:"INT-0001",f:"2025-10-02",eq:"EQ-005",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0002",f:"2025-10-03",eq:"EQ-004",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0003",f:"2025-10-03",eq:"EQ-008",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0004",f:"2025-10-04",eq:"EQ-014",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0005",f:"2025-10-05",eq:"EQ-001",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0006",f:"2025-10-06",eq:"EQ-020",tipo:"Puesta en marcha",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0007",f:"2025-10-17",eq:"EQ-002",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0008",f:"2025-10-26",eq:"EQ-010",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0009",f:"2025-11-01",eq:"EQ-016",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0010",f:"2025-11-08",eq:"EQ-015",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0011",f:"2025-11-17",eq:"EQ-009",tipo:"Inspección",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0012",f:"2025-11-19",eq:"EQ-006",tipo:"Correctivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0013",f:"2025-11-20",eq:"EQ-017",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0014",f:"2025-11-28",eq:"EQ-013",tipo:"Correctivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0015",f:"2025-11-30",eq:"EQ-019",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0016",f:"2025-12-04",eq:"EQ-011",tipo:"Inspección",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0017",f:"2025-12-06",eq:"EQ-018",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0018",f:"2025-12-26",eq:"EQ-008",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0019",f:"2025-12-27",eq:"EQ-004",tipo:"Correctivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0020",f:"2025-12-30",eq:"EQ-005",tipo:"Correctivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0021",f:"2026-01-04",eq:"EQ-001",tipo:"Inspección",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0022",f:"2026-01-04",eq:"EQ-014",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0023",f:"2026-01-09",eq:"EQ-020",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0024",f:"2026-01-15",eq:"EQ-002",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0025",f:"2026-01-28",eq:"EQ-010",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0026",f:"2026-02-09",eq:"EQ-009",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0027",f:"2026-02-12",eq:"EQ-007",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0028",f:"2026-02-13",eq:"EQ-006",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0029",f:"2026-02-20",eq:"EQ-017",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0030",f:"2026-02-25",eq:"EQ-013",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0031",f:"2026-02-27",eq:"EQ-019",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0032",f:"2026-03-11",eq:"EQ-018",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0033",f:"2026-03-12",eq:"EQ-011",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0034",f:"2026-03-19",eq:"EQ-012",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0035",f:"2026-03-23",eq:"EQ-008",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0036",f:"2026-03-25",eq:"EQ-004",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0037",f:"2026-03-28",eq:"EQ-005",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0038",f:"2026-04-03",eq:"EQ-014",tipo:"Correctivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0039",f:"2026-04-11",eq:"EQ-001",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0040",f:"2026-04-12",eq:"EQ-020",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0041",f:"2026-04-19",eq:"EQ-002",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0042",f:"2026-04-28",eq:"EQ-010",tipo:"Inspección",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0043",f:"2026-05-14",eq:"EQ-009",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0044",f:"2026-05-14",eq:"EQ-015",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0045",f:"2026-05-15",eq:"EQ-006",tipo:"Inspección",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0046",f:"2026-05-23",eq:"EQ-013",tipo:"Inspección",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0047",f:"2026-05-25",eq:"EQ-017",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0048",f:"2026-05-28",eq:"EQ-019",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0049",f:"2026-06-08",eq:"EQ-011",tipo:"Inspección",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0050",f:"2026-06-14",eq:"EQ-018",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0051",f:"2026-06-17",eq:"EQ-008",tipo:"Inspección",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0052",f:"2026-06-22",eq:"EQ-005",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0053",f:"2026-06-23",eq:"EQ-004",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0054",f:"2026-07-07",eq:"EQ-014",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0055",f:"2026-07-08",eq:"EQ-013",tipo:"Correctivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0056",f:"2026-07-08",eq:"EQ-020",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0057",f:"2026-07-12",eq:"EQ-001",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0058",f:"2026-07-18",eq:"EQ-002",tipo:"Correctivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0059",f:"2026-07-20",eq:"EQ-009",tipo:"Lavado serpentín",tec:"C. Salazar",estado:"En observación"},
+  {id:"INT-0060",f:"2026-07-21",eq:"EQ-010",tipo:"Preventivo",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0061",f:"2026-07-25",eq:"EQ-017",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0062",f:"2026-08-09",eq:"EQ-007",tipo:"Correctivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0063",f:"2026-08-14",eq:"EQ-006",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0064",f:"2026-09-03",eq:"EQ-019",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"},
+  {id:"INT-0065",f:"2026-09-12",eq:"EQ-008",tipo:"Preventivo",tec:"M. Quispe",estado:"Operativo"},
+  {id:"INT-0066",f:"2026-09-12",eq:"EQ-011",tipo:"Inspección",tec:"J. Ramírez",estado:"Operativo"},
+  {id:"INT-0067",f:"2026-09-14",eq:"EQ-010",tipo:"Correctivo",tec:"L. Torres",estado:"Fuera de servicio"},
+  {id:"INT-0068",f:"2026-09-19",eq:"EQ-018",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0069",f:"2026-09-24",eq:"EQ-005",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0070",f:"2026-09-27",eq:"EQ-001",tipo:"Inspección",tec:"M. Quispe",estado:"En observación"},
+  {id:"INT-0071",f:"2026-09-29",eq:"EQ-014",tipo:"Preventivo",tec:"L. Torres",estado:"Operativo"},
+  {id:"INT-0072",f:"2026-09-30",eq:"EQ-020",tipo:"Preventivo",tec:"C. Salazar",estado:"Operativo"}
+];
+
+let INVENTARIO = [
+  {id:"REP-001",desc:"Compresor Scroll 5TR",stock:2,min:1,cons:0.5,lead:30},
+  {id:"REP-002",desc:"Contactor 40A 3P",stock:8,min:5,cons:3.2,lead:7},
+  {id:"REP-003",desc:"Capacitor 60uF",stock:5,min:3,cons:2.1,lead:5},
+  {id:"REP-004",desc:"Filtro lavable 20x25",stock:25,min:15,cons:18,lead:3},
+  {id:"REP-005",desc:"R-410A (kg)",stock:40,min:20,cons:12.5,lead:10},
+  {id:"REP-006",desc:"R-134a (kg)",stock:15,min:10,cons:4,lead:10},
+  {id:"REP-007",desc:"R-22 (kg)",stock:3,min:2,cons:0.5,lead:15},
+  {id:"REP-008",desc:"R-32 (kg)",stock:5,min:2,cons:0.8,lead:12},
+  {id:"REP-009",desc:"Motor ventilador 1/2HP",stock:3,min:2,cons:0.8,lead:21},
+  {id:"REP-010",desc:"Motor ventilador 3/4HP",stock:2,min:1,cons:0.4,lead:21},
+  {id:"REP-011",desc:"Bomba condensado",stock:4,min:2,cons:1,lead:14},
+  {id:"REP-012",desc:"Presostato alta",stock:10,min:5,cons:2.5,lead:7},
+  {id:"REP-013",desc:"Presostato baja",stock:10,min:5,cons:2.5,lead:7},
+  {id:"REP-014",desc:"Válvula expansión",stock:3,min:2,cons:0.5,lead:25},
+  {id:"REP-015",desc:"Sensor NTC",stock:15,min:8,cons:4,lead:7},
+  {id:"REP-016",desc:"Correa B-42",stock:12,min:6,cons:5,lead:5},
+  {id:"REP-017",desc:"Rodamiento 6205",stock:20,min:10,cons:6.5,lead:5},
+  {id:"REP-018",desc:"Filtro secador",stock:18,min:10,cons:6,lead:5},
+  {id:"REP-019",desc:"Tarjeta control CRAC",stock:2,min:1,cons:0.2,lead:45},
+  {id:"REP-020",desc:"Aceite POE 1L",stock:10,min:5,cons:2,lead:10}
+];
+
+// ============================================================
+// LÓGICA DE CARGA DINÁMICA DE EXCEL
+// ============================================================
+function cargarExcel(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type: 'array'});
+      
+      // Leer hoja Equipos si existe
+      if(workbook.Sheets['Equipos']) {
+        const jsonEq = XLSX.utils.sheet_to_json(workbook.Sheets['Equipos']);
+        if(jsonEq.length > 0) {
+          EQUIPOS = jsonEq.map(row => ({
+            id: row['ID Equipo'] || row['id'] || '',
+            cli: row['ID Cliente'] || row['cli'] || '',
+            tag: row['Tag / código'] || row['tag'] || '',
+            ubi: row['Ubicación'] || row['ubi'] || '',
+            tipo: row['Tipo de equipo'] || row['tipo'] || '',
+            marca: row['Marca'] || row['marca'] || '',
+            tr: Number(row['Capacidad (TR)'] || row['tr'] || 0),
+            ref: row['Refrigerante'] || row['ref'] || 'R-410A',
+            frec: Number(row['Frecuencia de mantenimiento (días)'] || row['frec'] || 90),
+            estado: row['Estado operativo'] || row['estado'] || 'Operativo',
+            ult: row['Última intervención'] ? String(row['Última intervención']).substring(0,10) : '',
+            prox: row['Próxima intervención'] ? String(row['Próxima intervención']).substring(0,10) : ''
+          }));
+        }
+      }
+
+      // Leer hoja Historial si existe
+      if(workbook.Sheets['Historial']) {
+        const jsonHist = XLSX.utils.sheet_to_json(workbook.Sheets['Historial']);
+        if(jsonHist.length > 0) {
+          HISTORIAL = jsonHist.map(row => ({
+            id: row['ID Intervención'] || row['id'] || '',
+            f: row['Fecha'] ? String(row['Fecha']).substring(0,10) : '',
+            eq: row['ID Equipo'] || row['eq'] || '',
+            tipo: row['Tipo de intervención'] || row['tipo'] || 'Preventivo',
+            tec: row['Técnico'] || row['tec'] || 'General',
+            estado: row['Estado resultante'] || row['estado'] || 'Operativo'
+          }));
+        }
+      }
+
+      alert("¡Base de datos actualizada con éxito desde el archivo Excel!");
+      poblarFiltros();
+      renderAll();
+    } catch(err) {
+      console.error(err);
+      alert("Hubo un error al procesar el archivo Excel. Asegúrate de que las columnas coincidan.");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ============================================================
+// ESTADO Y FILTROS
+// ============================================================
+let filtros = {cli:"", tipo:"", estado:"", desde:"", hasta:""};
+const charts = {};
+
+function getClienteNombre(id){ return (CLIENTES.find(c=>c.id===id)||{}).nombre || id; }
+
+function equiposFiltrados(){
+  return EQUIPOS.filter(e=>{
+    if(filtros.cli && e.cli!==filtros.cli) return false;
+    if(filtros.tipo && e.tipo!==filtros.tipo) return false;
+    if(filtros.estado && e.estado!==filtros.estado) return false;
+    return true;
+  });
+}
+function historialFiltrado(){
+  const ids = new Set(equiposFiltrados().map(e=>e.id));
+  return HISTORIAL.filter(h=>{
+    if(!ids.has(h.eq)) return false;
+    if(filtros.desde && h.f < filtros.desde) return false;
+    if(filtros.hasta && h.f > filtros.hasta) return false;
+    return true;
+  });
+}
+
+// ============================================================
+// CÁLCULOS
+// ============================================================
+function calcIntervalos(){
+  const result = [];
+  equiposFiltrados().forEach(eq=>{
+    const visitas = HISTORIAL.filter(h=>h.eq===eq.id).sort((a,b)=>a.f.localeCompare(b.f));
+    if(visitas.length < 2){
+      result.push({eq, visitas:visitas.length, intProm:null, desv:null, cump:null, diag:"Sin historial suficiente"});
+      return;
+    }
+    const diffs = [];
+    for(let i=1;i<visitas.length;i++){
+      const d1 = new Date(visitas[i-1].f), d2 = new Date(visitas[i].f);
+      diffs.push(Math.round((d2-d1)/(1000*60*60*24)));
+    }
+    const prom = diffs.reduce((a,b)=>a+b,0)/diffs.length;
+    const desv = prom - eq.frec;
+    const cump = (prom/eq.frec)*100;
+    let diag = "✅ En rango";
+    if(Math.abs(desv) > eq.frec*0.2) diag = desv>0 ? "⚠️ Se atrasa" : "🔵 Se adelanta";
+    if(eq.estado==="Fuera de servicio") diag = "🔴 Fuera de servicio";
+    if(eq.estado==="En observación") diag = "🟡 En observación";
+    result.push({eq, visitas:visitas.length, intProm:Math.round(prom), desv:Math.round(desv), cump:Math.round(cump), diag});
+  });
+  return result;
+}
+
+// ============================================================
+// RENDER KPIs
+// ============================================================
+function renderKPIs(){
+  const eqs = equiposFiltrados();
+  const hist = historialFiltrado();
+  document.getElementById('kTotal').textContent = eqs.length;
+  const oper = eqs.filter(e=>e.estado==="Operativo").length;
+  document.getElementById('kOper').textContent = oper;
+  document.getElementById('kOperPct').textContent = eqs.length? Math.round(oper/eqs.length*100)+"% del parque":"—";
+  document.getElementById('kObs').textContent = eqs.filter(e=>e.estado==="En observación").length;
+  document.getElementById('kFS').textContent = eqs.filter(e=>e.estado==="Fuera de servicio").length;
+  document.getElementById('kInt').textContent = hist.length;
+
+  const ints = calcIntervalos().filter(i=>i.intProm!==null);
+  const cumpProm = ints.length? Math.round(ints.reduce((a,b)=>a+b.cump,0)/ints.length):0;
+  document.getElementById('kCump').textContent = cumpProm+"%";
+
+  // KPIs equipos
+  const capTotal = eqs.reduce((a,e)=>a+e.tr,0);
+  document.getElementById('kCapTotal').textContent = capTotal;
+  const refs = new Set(eqs.map(e=>e.ref));
+  document.getElementById('kRefrig').textContent = refs.size;
+  document.getElementById('kR22').textContent = eqs.filter(e=>e.ref==="R-22").length;
+
+  // KPIs mantenimiento
+  const intProm = ints.length? Math.round(ints.reduce((a,b)=>a+b.intProm,0)/ints.length):0;
+  document.getElementById('kIntProm').textContent = intProm+"d";
+  const prev = hist.filter(h=>h.tipo==="Preventivo").length;
+  const corr = hist.filter(h=>h.tipo==="Correctivo").length;
+  document.getElementById('kPrev').textContent = hist.length? Math.round(prev/hist.length*100)+"%":"—";
+  document.getElementById('kCorr').textContent = hist.length? Math.round(corr/hist.length*100)+"%":"—";
+  const desvProm = ints.length? Math.round(ints.reduce((a,b)=>a+Math.abs(b.desv),0)/ints.length):0;
+  document.getElementById('kDesv').textContent = desvProm+"d";
+
+  // KPIs stock
+  const inv = INVENTARIO;
+  document.getElementById('kRep').textContent = inv.length;
+  document.getElementById('kStockOK').textContent = inv.filter(i=>i.stock >= i.min*1.5).length;
+  document.getElementById('kStockBajo').textContent = inv.filter(i=>i.stock >= i.min && i.stock < i.min*1.5).length;
+  document.getElementById('kQuiebre').textContent = inv.filter(i=>i.stock < i.min).length;
+
+  // KPIs alertas
+  document.getElementById('kCriticos').textContent = eqs.filter(e=>e.estado==="Fuera de servicio").length;
+  const hoy = new Date();
+  const en30 = new Date(); en30.setDate(hoy.getDate()+30);
+  const prox30 = eqs.filter(e=>{
+    if(!e.prox) return false;
+    const d = new Date(e.prox);
+    return d >= hoy && d <= en30;
+  }).length;
+  document.getElementById('kProx30').textContent = prox30;
+  const vencidos = eqs.filter(e=>{
+    if(!e.prox) return false;
+    return new Date(e.prox) < hoy;
+  }).length;
+  document.getElementById('kVencidos').textContent = vencidos;
+}
+
+// ============================================================
+// GRÁFICOS
+// ============================================================
+const palette = ['#38bdf8','#22c55e','#eab308','#ef4444','#a855f7','#f97316','#14b8a6','#ec4899'];
+
+function destroyChart(id){ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }
+
+function renderCharts(){
+  const eqs = equiposFiltrados();
+  const hist = historialFiltrado();
+
+  // ---- Estado (dona)
+  const estados = {};
+  eqs.forEach(e=> estados[e.estado]=(estados[e.estado]||0)+1);
+  destroyChart('chEstado');
+  charts['chEstado'] = new Chart(document.getElementById('chEstado'),{
+    type:'doughnut',
+    data:{labels:Object.keys(estados),datasets:[{data:Object.values(estados),
+      backgroundColor:['#22c55e','#eab308','#ef4444','#94a3b8']}]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Tipo (barras)
+  const tipos = {};
+  eqs.forEach(e=> tipos[e.tipo]=(tipos[e.tipo]||0)+1);
+  destroyChart('chTipo');
+  charts['chTipo'] = new Chart(document.getElementById('chTipo'),{
+    type:'bar',
+    data:{labels:Object.keys(tipos),datasets:[{data:Object.values(tipos),
+      backgroundColor:palette}]},
+    options:{plugins:{legend:{display:false}},scales:{
+      x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Intervenciones por mes (línea)
+  const meses = {};
+  hist.forEach(h=>{ const m=h.f.substring(0,7); meses[m]=(meses[m]||0)+1; });
+  const mesKeys = Object.keys(meses).sort();
+  destroyChart('chMes');
+  charts['chMes'] = new Chart(document.getElementById('chMes'),{
+    type:'line',
+    data:{labels:mesKeys,datasets:[{label:'Intervenciones',data:mesKeys.map(k=>meses[k]),
+      borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.2)',fill:true,tension:.3}]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{
+      x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Capacidad por cliente (barras horizontales)
+  const capCli = {};
+  eqs.forEach(e=>{ capCli[getClienteNombre(e.cli)] = (capCli[getClienteNombre(e.cli)]||0)+e.tr; });
+  destroyChart('chCap');
+  charts['chCap'] = new Chart(document.getElementById('chCap'),{
+    type:'bar',
+    data:{labels:Object.keys(capCli),datasets:[{data:Object.values(capCli),
+      backgroundColor:'#a855f7'}]},
+    options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{
+      x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Refrigerante
+  const refs = {};
+  eqs.forEach(e=> refs[e.ref]=(refs[e.ref]||0)+1);
+  destroyChart('chRefrig');
+  charts['chRefrig'] = new Chart(document.getElementById('chRefrig'),{
+    type:'pie',
+    data:{labels:Object.keys(refs),datasets:[{data:Object.values(refs),
+      backgroundColor:palette}]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Equipos por cliente
+  const eqCli = {};
+  eqs.forEach(e=>{ eqCli[getClienteNombre(e.cli)] = (eqCli[getClienteNombre(e.cli)]||0)+1; });
+  destroyChart('chCli');
+  charts['chCli'] = new Chart(document.getElementById('chCli'),{
+    type:'bar',
+    data:{labels:Object.keys(eqCli),datasets:[{data:Object.values(eqCli),
+      backgroundColor:'#22c55e'}]},
+    options:{plugins:{legend:{display:false}},scales:{
+      x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Intervalos reales vs nominal
+  const ints = calcIntervalos().filter(i=>i.intProm!==null);
+  destroyChart('chIntervalos');
+  charts['chIntervalos'] = new Chart(document.getElementById('chIntervalos'),{
+    type:'bar',
+    data:{labels:ints.map(i=>i.eq.id),
+      datasets:[
+        {label:'Intervalo real',data:ints.map(i=>i.intProm),backgroundColor:'#38bdf8'},
+        {label:'Frecuencia nominal',data:ints.map(i=>i.eq.frec),backgroundColor:'#f97316'}
+      ]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{
+      x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Scatter TR vs intervalo
+  destroyChart('chScatter');
+  charts['chScatter'] = new Chart(document.getElementById('chScatter'),{
+    type:'scatter',
+    data:{datasets:[{label:'Equipos',data:ints.map(i=>({x:i.eq.tr,y:i.intProm})),
+      backgroundColor:'#22c55e',pointRadius:6}]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{
+      x:{title:{display:true,text:'Capacidad (TR)',color:'#94a3b8'},ticks:{color:'#94a3b8'}},
+      y:{title:{display:true,text:'Intervalo real (días)',color:'#94a3b8'},ticks:{color:'#94a3b8'}}
+    },maintainAspectRatio:false}
+  });
+
+  // ---- Técnicos
+  const tecs = {};
+  hist.forEach(h=> tecs[h.tec]=(tecs[h.tec]||0)+1);
+  destroyChart('chTecnico');
+  charts['chTecnico'] = new Chart(document.getElementById('chTecnico'),{
+    type:'bar',
+    data:{labels:Object.keys(tecs),datasets:[{data:Object.values(tecs),
+      backgroundColor:palette}]},
+    options:{plugins:{legend:{display:false}},scales:{
+      x:{ticks:{color:'#94a3b8'}},y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Tipo intervención
+  const tiposInt = {};
+  hist.forEach(h=> tiposInt[h.tipo]=(tiposInt[h.tipo]||0)+1);
+  destroyChart('chTipoInt');
+  charts['chTipoInt'] = new Chart(document.getElementById('chTipoInt'),{
+    type:'doughnut',
+    data:{labels:Object.keys(tiposInt),datasets:[{data:Object.values(tiposInt),
+      backgroundColor:palette}]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Stock
+  const invTop = [...INVENTARIO].sort((a,b)=>b.cons-a.cons).slice(0,12);
+  destroyChart('chStock');
+  charts['chStock'] = new Chart(document.getElementById('chStock'),{
+    type:'bar',
+    data:{labels:invTop.map(i=>i.desc),
+      datasets:[
+        {label:'Stock actual',data:invTop.map(i=>i.stock),backgroundColor:'#22c55e'},
+        {label:'Stock mínimo',data:invTop.map(i=>i.min),backgroundColor:'#ef4444'}
+      ]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{
+      x:{ticks:{color:'#94a3b8',maxRotation:45,minRotation:45,font:{size:9}}},
+      y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+
+  // ---- Curva ABC
+  const sorted = [...INVENTARIO].sort((a,b)=>b.cons-a.cons);
+  let acum = 0; const total = sorted.reduce((a,b)=>a+b.cons,0);
+  const abcData = sorted.map(i=>{ acum+=i.cons; return (acum/total*100); });
+  destroyChart('chABC');
+  charts['chABC'] = new Chart(document.getElementById('chABC'),{
+    type:'line',
+    data:{labels:sorted.map(i=>i.desc),datasets:[{label:'% acumulado',data:abcData,
+      borderColor:'#eab308',backgroundColor:'rgba(234,179,8,.2)',fill:true,tension:.2}]},
+    options:{plugins:{legend:{labels:{color:'#e2e8f0'}}},scales:{
+      x:{ticks:{color:'#94a3b8',maxRotation:60,font:{size:8}}},
+      y:{ticks:{color:'#94a3b8'}}},maintainAspectRatio:false}
+  });
+}
+
+// ============================================================
+// TABLAS
+// ============================================================
+function badgeEstado(estado){
+  const map = {"Operativo":"b-green","En observación":"b-yellow",
+    "Fuera de servicio":"b-red","Pendiente de instalación":"b-blue"};
+  return `<span class="badge ${map[estado]||'b-blue'}">${estado}</span>`;
+}
+
+function renderTablas(){
+  // Equipos
+  const tbodyEq = document.querySelector('#tblEquipos tbody');
+  tbodyEq.innerHTML = equiposFiltrados().map(e=>`
+    <tr>
+      <td>${e.id}</td><td>${e.tag}</td><td>${e.tipo}</td><td>${e.marca}</td>
+      <td>${getClienteNombre(e.cli)}</td><td>${e.tr}</td><td>${e.ref}</td>
+      <td>${e.frec}d</td><td>${badgeEstado(e.estado)}</td>
+      <td>${e.prox||'—'}</td>
+    </tr>`).join('');
+
+  // Intervalos
+  const ints = calcIntervalos();
+  const tbodyInt = document.querySelector('#tblIntervalos tbody');
+  tbodyInt.innerHTML = ints.map(i=>{
+    const cumpColor = i.cump===null?'#94a3b8':(i.cump>=80&&i.cump<=120?'#22c55e':(i.cump<80?'#ef4444':'#eab308'));
+    return `<tr>
+      <td>${i.eq.id} — ${i.eq.tipo}</td><td>${i.eq.tipo}</td><td>${i.eq.frec}d</td>
+      <td>${i.visitas}</td><td>${i.intProm!==null?i.intProm+'d':'—'}</td>
+      <td>${i.desv!==null?(i.desv>0?'+':'')+i.desv+'d':'—'}</td>
+      <td style="color:${cumpColor};font-weight:bold">${i.cump!==null?i.cump+'%':'—'}</td>
+      <td>${i.diag}</td>
+    </tr>`;
+  }).join('');
+
+  // Stock
+  const tbodyStock = document.querySelector('#tblStock tbody');
+  tbodyStock.innerHTML = INVENTARIO.map(i=>{
+    const dias = i.cons>0? Math.round(i.stock/i.cons*30):999;
+    const punto = Math.ceil(i.cons/30*i.lead + i.min*0.5);
+    let est = "OK", cls="b-green";
+    if(i.stock < i.min){ est="QUIEBRE"; cls="b-red"; }
+    else if(i.stock < i.min*1.5){ est="BAJO"; cls="b-yellow"; }
+    return `<tr>
+      <td>${i.id}</td><td>${i.desc}</td><td>${i.stock}</td><td>${i.min}</td>
+      <td>${i.cons}</td><td>${dias}</td><td>${punto}</td>
+      <td><span class="badge ${cls}">${est}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ============================================================
+// ALERTAS
+// ============================================================
+function renderAlertas(){
+  const eqs = equiposFiltrados();
+  const lista = document.getElementById('listaAlertas');
+  const criticos = eqs.filter(e=>e.estado==="Fuera de servicio"||e.estado==="En observación");
+  lista.innerHTML = criticos.length? criticos.map(e=>{
+    const icon = e.estado==="Fuera de servicio"?"🔴":"🟡";
+    return `<div style="padding:10px;border-left:3px solid ${e.estado==="Fuera de servicio"?'#ef4444':'#eab308'};
+      background:var(--panel2);margin-bottom:8px;border-radius:6px">
+      ${icon} <b>${e.id}</b> — ${e.tipo} ${e.marca} (${e.tr}TR)<br>
+      <span style="color:var(--muted);font-size:11px">${getClienteNombre(e.cli)} · ${e.ubi}</span><br>
+      <span style="color:var(--muted);font-size:11px">Estado: ${e.estado}</span>
+    </div>`;
+  }).join('') : '<div style="color:var(--muted);text-align:center;padding:20px">✅ Sin equipos críticos</div>';
+
+  const prox = document.getElementById('listaProx');
+  const hoy = new Date();
+  const ordenados = eqs.filter(e=>e.prox).map(e=>({...e, d:new Date(e.prox)}))
+    .sort((a,b)=>a.d-b.d);
+  prox.innerHTML = ordenados.map(e=>{
+    const dias = Math.round((e.d-hoy)/(1000*60*60*24));
+    const color = dias<0?'#ef4444':dias<15?'#eab308':'#22c55e';
+    return `<div style="padding:8px;border-bottom:1px solid var(--border)">
+      <b style="color:${color}">${e.id}</b> — ${e.tipo}<br>
+      <span style="color:var(--muted);font-size:11px">${e.prox} (${dias<0?Math.abs(dias)+'d vencido':dias+'d'})</span>
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
+// FILTROS UI
+// ============================================================
+function poblarFiltros(){
+  const fCli = document.getElementById('fCliente');
+  fCli.innerHTML = '<option value="">Todos los clientes</option>';
+  CLIENTES.forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=c.nombre; fCli.appendChild(o); });
+
+  const fTipo = document.getElementById('fTipo');
+  fTipo.innerHTML = '<option value="">Todos los tipos</option>';
+  [...new Set(EQUIPOS.map(e=>e.tipo))].forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; fTipo.appendChild(t?o:null); });
+
+  const fEstado = document.getElementById('fEstado');
+  fEstado.innerHTML = '<option value="">Todos los estados</option>';
+  [...new Set(EQUIPOS.map(e=>e.estado))].forEach(e=>{ const o=document.createElement('option'); o.value=e; o.textContent=e; fEstado.appendChild(o); });
+}
+
+function initFiltros(){
+  poblarFiltros();
+  const fCli = document.getElementById('fCliente');
+  const fTipo = document.getElementById('fTipo');
+  const fEstado = document.getElementById('fEstado');
+
+  fCli.onchange = ()=>{filtros.cli=fCli.value; renderAll();};
+  fTipo.onchange = ()=>{filtros.tipo=fTipo.value; renderAll();};
+  fEstado.onchange = ()=>{filtros.estado=fEstado.value; renderAll();};
+  document.getElementById('fDesde').onchange = (e)=>{filtros.desde=e.target.value; renderAll();};
+  document.getElementById('fHasta').onchange = (e)=>{filtros.hasta=e.target.value; renderAll();};
+}
+
+// ============================================================
+// TABS
+// ============================================================
+function initTabs(){
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.onclick = ()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.querySelectorAll('section[id^="tab-"]').forEach(s=>s.classList.add('hidden'));
+      document.getElementById('tab-'+t.dataset.tab).classList.remove('hidden');
+      setTimeout(renderCharts,50);
+    };
+  });
+}
+
+// ============================================================
+// RENDER ALL
+// ============================================================
+function renderAll(){
+  renderKPIs();
+  renderCharts();
+  renderTablas();
+  renderAlertas();
+}
+
+initFiltros();
+initTabs();
+renderAll();
+</script>
+</body>
+</html>
